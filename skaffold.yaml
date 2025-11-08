@@ -1,0 +1,85 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: service-template
+
+build:
+  artifacts:
+    - image: ghcr.io/yourusername/service-template
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          BUILDKIT_INLINE_CACHE: "1"
+      sync:
+        manual:
+          - src: "app/**/*.py"
+            dest: /app/app
+  # Use local build for k3d
+  local:
+    push: false
+    useBuildkit: true
+
+deploy:
+  kubectl:
+    manifests:
+      - k8s/configmap.yaml
+      - k8s/deployment.yaml
+      - k8s/service.yaml
+  # Alternative: use kustomize
+  # kustomize:
+  #   paths:
+  #     - k8s
+
+portForward:
+  - resourceType: service
+    resourceName: service-template
+    port: 8000
+    localPort: 8000
+
+profiles:
+  # Development profile with debug settings
+  - name: dev
+    patches:
+      - op: add
+        path: /build/artifacts/0/docker/buildArgs/DEBUG
+        value: "true"
+    deploy:
+      kubectl:
+        manifests:
+          - k8s/configmap.yaml
+          - k8s/deployment.yaml
+          - k8s/service.yaml
+    activation:
+      - command: dev
+
+  # Production profile
+  - name: prod
+    build:
+      artifacts:
+        - image: ghcr.io/yourusername/service-template
+          docker:
+            dockerfile: Dockerfile
+      local:
+        push: true # Push to registry in production
+        useBuildkit: true
+    activation:
+      - command: run
+        env: SKAFFOLD_PROFILE=prod
+
+  # Debug profile with hot reload
+  - name: debug
+    build:
+      artifacts:
+        - image: ghcr.io/yourusername/service-template
+          docker:
+            dockerfile: Dockerfile
+          sync:
+            manual:
+              - src: "app/**/*.py"
+                dest: /app/app
+    patches:
+      - op: replace
+        path: /deploy/kubectl/manifests/0
+        value: k8s/configmap.yaml
+    activation:
+      - command: debug

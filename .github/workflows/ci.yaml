@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for commitizen
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Check uv.lock is up to date
+        run: uv lock --locked
+
+      - name: Validate commit messages (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Get all commits in the PR
+          git fetch origin ${{ github.base_ref }}
+          COMMITS=$(git rev-list origin/${{ github.base_ref }}..HEAD)
+
+          # Check each commit message
+          for commit in $COMMITS; do
+            echo "Checking commit: $commit"
+            MESSAGE=$(git log --format=%B -n 1 $commit)
+            echo "$MESSAGE" | uv run cz check --commit-msg-file -
+          done
+
+      - name: Run ruff lint
+        run: uv run ruff check .
+
+      - name: Run ruff format check
+        run: uv run ruff format --check .
+
+      - name: Run mypy
+        run: uv run mypy app
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: service-template:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
