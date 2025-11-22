@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.endpoints import executor
+
 api_router = APIRouter()
 
-# Include endpoint routers here
-# Example:
-# from app.api.v1.endpoints import example
-# api_router.include_router(example.router, prefix="/example", tags=["example"])
+# Include endpoint routers
+api_router.include_router(executor.router, prefix="/agent", tags=["executor"])
