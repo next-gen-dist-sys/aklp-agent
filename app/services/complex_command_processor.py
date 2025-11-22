@@ -80,6 +80,7 @@ class ComplexCommandProcessor:
                  생성에 실패하면 'kubectl # UNABLE_TO_GENERATE' 또는
                  모델 응답 원문 일부가 반환될 수 있다.
         """
+        """
         system_prompt = self._build_system_prompt()
 
         # LLM 호출 (동기 클라이언트 사용)
@@ -105,3 +106,5 @@ class ComplexCommandProcessor:
             return "kubectl # UNABLE_TO_GENERATE"
 
         return kubectl_cmd
+        """
+        return f"[MOCK] 복잡한 명령으로 판단되어 LLM 처리 필요: {command}"
