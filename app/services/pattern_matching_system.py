@@ -1,16 +1,27 @@
 import re
+from typing import TypedDict  # TypedDict와 List를 추가로 임포트했습니다.
 
 from app.services.complex_command_processor import ComplexCommandProcessor
 
-SIMPLE_COMMAND_DEFINITION = [
+
+# 1. 딕셔너리 구조를 명확히 정의하는 TypedDict를 생성합니다.
+#    mypy가 각 키의 타입을 정확히 인식하도록 돕습니다.
+class CommandDefinition(TypedDict):
+    intent_key: str
+    kubectl_template: str
+    keywords: list[str]
+
+
+# 2. SIMPLE_COMMAND_DEFINITION의 타입을 TypedDict 리스트로 지정합니다.
+SIMPLE_COMMAND_DEFINITION: list[CommandDefinition] = [
     {
         "intent_key": "pod_list",
-        "kubectl_template": "kubectl get pods -l app={target}",
+        "kubectl_template": "kubectl get pods",  # 기본: 전체 파드 목록
         "keywords": ["pod 목록", "파드 목록", "pod 리스트", "파드 리스트"],
     },
     {
         "intent_key": "service_status",
-        "kubectl_template": "kubectl get services {target}",
+        "kubectl_template": "kubectl get services",  # 기본: 전체 서비스 목록
         "keywords": ["서비스 상태", "서비스 목록", "service 상태", "서비스 리스트"],
     },
     {
@@ -19,6 +30,25 @@ SIMPLE_COMMAND_DEFINITION = [
         "keywords": ["로그 조회", "log 확인", "로그 보기", "로그좀"],
     },
 ]
+
+# 자연어 토큰 → kubectl-friendly 토큰 정규화
+CANONICAL_TARGET_MAP: dict[str, str] = {
+    # 파드
+    "파드": "pod",
+    "파드들": "pod",
+    "pod": "pod",
+    "pods": "pod",
+    # 서비스
+    "서비스": "service",
+    "서비스들": "service",
+    "service": "service",
+    "services": "service",
+    # 로그
+    "로그": "logs",
+    "로그들": "logs",
+    "log": "logs",
+    "logs": "logs",
+}
 
 
 class PatternMatchingSystem:
@@ -36,9 +66,11 @@ class PatternMatchingSystem:
         # intent_key 기준으로 keyword 패턴 구성
         # 예: "pod_list" -> /(pod 목록|파드 목록|...)/
         self.patterns: dict[str, re.Pattern[str]] = {}
+        # 3. definition의 타입을 CommandDefinition으로 명시하여 mypy 오류를 방지합니다.
         for cmd_def in SIMPLE_COMMAND_DEFINITION:
-            intent_key = str(cmd_def["intent_key"])
-            keywords = list(cmd_def["keywords"])
+            # cmd_def는 이제 CommandDefinition 타입으로 인식됩니다.
+            intent_key = cmd_def["intent_key"]
+            keywords = cmd_def["keywords"]
 
             pattern_str = "|".join(re.escape(kw) for kw in keywords)
             self.patterns[intent_key] = re.compile(pattern_str)
@@ -49,11 +81,22 @@ class PatternMatchingSystem:
             "namespace": re.compile(r"(?:네임스페이스|nm|ns)\s*([가-힣a-zA-Z0-9_-]+)"),
             # 모든 네임스페이스 (-A) 매칭
             "all_namespaces": re.compile(r"(모든|전체)\s*(네임스페이스)"),
-            # 레이블 필터 (-l) 값 추출 (예: app=api)
+            # 레이블 필터 값 추출 (예: 서비스 api → label=api 로 쓸 수 있게)
             "label": re.compile(r"(?:앱|서비스|이름)\s*([가-힣a-zA-Z0-9_-]+)"),
             # 컨테이너 지정 (-c) 값 추출
             "container": re.compile(r"(?:컨테이너|c)\s*([가-힣a-zA-Z0-9_-]+)"),
         }
+
+    def _canonicalize_target(
+        self,
+        value: str | None,
+    ) -> str | None:
+        """
+        파드/서비스 같은 자연어 토큰을 영어 토큰으로 정규화
+        """
+        if value is None:
+            return None
+        return CANONICAL_TARGET_MAP.get(value, value)
 
     def _extract_filters(
         self,
@@ -64,56 +107,90 @@ class PatternMatchingSystem:
         """
         filters: dict[str, str] = {}
 
-        # 네임스페이스 추출
-        ns_match = self.filter_patterns["namespace"].search(command)
-        if ns_match:
-            filters["-n"] = ns_match.group(1)
+        # 1) "모든/전체 네임스페이스" 먼저 처리 → -A
+        if self.filter_patterns["all_namespaces"].search(command):
+            # -A만 쓰고, -n은 강제로 안 씀
+            filters["all_namespaces"] = "true"
+        else:
+            # 2) 그 외의 경우에만 특정 네임스페이스 추출 → -n
+            ns_match = self.filter_patterns["namespace"].search(command)
+            if ns_match:
+                filters["namespace"] = ns_match.group(1)
 
-        # 모든 네임스페이스 매칭
-        if self.filter_patterns["all_namespaces"].search(command) and "-n" not in filters:
-            filters["-A"] = ""
-
-        # 레이블 필터 추출
+        # 3) 레이블 필터 추출
         label_match = self.filter_patterns["label"].search(command)
         if label_match:
-            filters["-l"] = label_match.group(1)
+            filters["label"] = label_match.group(1)
 
-        # 컨테이너 지정 추출
+        # 4) 컨테이너 지정 추출
         container_match = self.filter_patterns["container"].search(command)
         if container_match:
-            filters["-c"] = container_match.group(1)
+            filters["container"] = container_match.group(1)
 
         return filters
 
     def _build_command(
         self,
-        intent: str,
-        resource: str,
+        intent_key: str,
+        resource: str | None,
         filters: dict[str, str],
     ) -> str:
         """
-        추출된 인텐트, 리소스, 필터를 기반으로 kubectl 명령어를 조합
+        intent_key 와 필터 정보를 바탕으로 최종 kubectl 명령어 생성
         """
-        base_command = f"kubectl {intent}".strip()
-        if resource:
-            base_command += f" {resource}"
+        # definition은 CommandDefinition 타입으로 인식됩니다.
+        definition = next(
+            (d for d in SIMPLE_COMMAND_DEFINITION if d["intent_key"] == intent_key),
+            None,
+        )
+        if definition is None:
+            # 정의 안 된 인텐트면 그냥 fallback
+            return f"kubectl {intent_key}"
 
-        options: list[str] = []
+        # label 값 정규화 (서비스 / 파드 이름 등)
+        raw_label = filters.get("label")
+        label_value = self._canonicalize_target(raw_label)
 
-        if "-A" in filters:
-            options.append("-A")
-        elif "-n" in filters:
-            options.append(f"-n {filters['-n']}")
+        # 1) intent 별 기본 base command
+        if intent_key == "pod_list":
+            # 파드 목록
+            if label_value:
+                base_cmd = f"kubectl get pods -l app={label_value}"
+            else:
+                base_cmd = "kubectl get pods"
 
-        if "-l" in filters:
-            options.append(f"-l {filters['-l']}")
+        elif intent_key == "service_status":
+            # 서비스 목록 / 상태
+            if label_value:
+                # 특정 서비스만 보고 싶다면: kubectl get services <name>
+                base_cmd = f"kubectl get services {label_value}"
+            else:
+                base_cmd = "kubectl get services"
 
-        if "-c" in filters and intent == "logs":
-            options.append(f"-c {filters['-c']}")
+        elif intent_key == "pod_logs":
+            # 로그는 target 필수 (사전 체크 있음)
+            base_cmd = f"kubectl logs -f --tail=10 {label_value}"
+        else:
+            # 혹시 모를 확장용 fallback (템플릿 그대로 사용)
+            # TypedDict 덕분에 mypy는 definition["kubectl_template"]이 str임을 압니다.
+            kubectl_template: str = definition["kubectl_template"]
+            base_cmd = kubectl_template.format(target=label_value or "")
 
-        if options:
-            return f"{base_command} {' '.join(options)}"
-        return base_command
+        parts: list[str] = [base_cmd]
+
+        # 2) 옵션들 부착 (-n, -A, -c)
+        namespace = filters.get("namespace")
+        if namespace:
+            parts.append(f"-n {namespace}")
+
+        if filters.get("all_namespaces"):
+            parts.append("-A")
+
+        container = filters.get("container")
+        if container:
+            parts.append(f"-c {container}")
+
+        return " ".join(parts)
 
     def process_command(
         self,
@@ -139,12 +216,15 @@ class PatternMatchingSystem:
             return self.complex_command_handler.process(normalized_command)
 
         intent, resource = intent_map[best_match]
-        resource_name: str = resource or ""
 
         filters = self._extract_filters(normalized_command)
 
-        # 로그 명령어는 반드시 어떤 파드를 대상으로 할지 지정해야 함 (레이블 필터 또는 파드 이름)
-        if intent == "logs" and "-l" not in filters:
+        # 로그는 타겟이 없으면 ComplexCommandProcessor로 넘김
+        if intent == "logs" and not filters.get("label"):
             return self.complex_command_handler.process(normalized_command)
 
-        return self._build_command(intent, resource_name, filters)
+        return self._build_command(
+            intent_key=best_match,
+            resource=resource,
+            filters=filters,
+        )
