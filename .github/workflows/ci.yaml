@@ -41,7 +41,10 @@ jobs:
           for commit in $COMMITS; do
             echo "Checking commit: $commit"
             MESSAGE=$(git log --format=%B -n 1 $commit)
-            echo "$MESSAGE" | uv run cz check --commit-msg-file -
+            # Write message to temporary file for commitizen
+            echo "$MESSAGE" > /tmp/commit-msg-$commit
+            uv run cz check --commit-msg-file /tmp/commit-msg-$commit
+            rm /tmp/commit-msg-$commit
           done
 
       - name: Run ruff lint
