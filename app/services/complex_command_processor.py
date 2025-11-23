@@ -24,8 +24,8 @@ class ComplexCommandProcessor:
         self.model = settings.OPENAI_MODEL
         self.timeout = settings.OPENAI_TIMEOUT
 
-    def _build_system_prompt(self) -> str:
-        """system 프롬프트 정의"""
+    def _build_instructions(self) -> str:
+        """instructions 프롬프트 정의"""
         return (
             "You are an expert Kubernetes operator and kubectl CLI generator.\n"
             "The user will give you a request in Korean (sometimes mixed with English).\n"
@@ -62,74 +62,34 @@ class ComplexCommandProcessor:
 
         return text
 
-    def _build_input_messages(self, command: str) -> list[dict[str, object]]:
-        """Responses API input 메시지 생성."""
-        system_prompt = self._build_system_prompt()
-        return [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": system_prompt}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n"
-                            f"요청: {command}"
-                        ),
-                    }
-                ],
-            },
-        ]
+    def _build_user_input(self, command: str) -> str:
+        """Responses API input 문자열 생성."""
+        return f"다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n요청: {command}"
 
     def _call_responses(self, command: str) -> KubectlStructuredOutput | None | str:
         """Responses API 호출을 수행하고 BaseModel로 파싱."""
-        messages = self._build_input_messages(command)
+        user_input = self._build_user_input(command)
+        instructions = self._build_instructions()
 
         try:
-            parsed = self.client.responses.parse(
-                model=self.model,
-                input=messages,
-                max_output_tokens=128,
-                timeout=self.timeout,
-                response_format=KubectlStructuredOutput,
+            response = self.client.responses.parse(
+                model='gpt-5-mini',
+                input=user_input,
+                instructions=instructions,
+                text_format=KubectlStructuredOutput,
             )
-            first = None
-            if parsed.output_parsed:
-                first = parsed.output_parsed[0]
-            elif parsed.output and parsed.output[0].parsed:
-                first = parsed.output[0].parsed
-        except TypeError:
-            # SDK가 BaseModel response_format을 지원하지 않는 경우 json_schema로 재시도
-            fallback_schema = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "KubectlCommand",
-                    "schema": KubectlStructuredOutput.model_json_schema(),
-                    "strict": True,
-                },
-            }
-            parsed = self.client.responses.create(
-                model=self.model,
-                input=messages,
-                max_output_tokens=128,
-                timeout=self.timeout,
-                response_format=fallback_schema,
-            )
-            first = parsed.output[0].parsed if parsed.output else None
+
+            return response.output_parsed
+            # # output[0] -> message -> content[0] -> output_text -> parsed
+            # for item in response.output:
+            #     if item.type == "message":
+            #         for content in item.content:
+            #             if content.type == "output_text" and content.parsed:
+            #                 return content.parsed
+            # return None
+
         except Exception as e:
             return f"kubectl # LLM_CALL_FAILED: {e}"
-
-        if isinstance(first, BaseModel):
-            return first
-        if isinstance(first, dict):
-            try:
-                return KubectlStructuredOutput(**first)
-            except Exception:
-                return None
-        return None
 
     def process(
         self,
