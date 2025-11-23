@@ -38,7 +38,7 @@ class ComplexCommandProcessor:
             "- If the user mentions '모든 네임스페이스' or '전체 네임스페이스', use '-A'.\n"
             "- If the user refers to an app/service name, use label selectors when appropriate (e.g., '-l app=<name>').\n"
             "- If you truly cannot generate a kubectl command, return exactly: 'kubectl # UNABLE_TO_GENERATE'.\n"
-            "- You must always populate the fields: command (kubectl line), reason (brief reasoning), title (concise summary)."
+            "- You must always populate the fields: command (kubectl line), reason (brief reasoning, in korean), title (concise summary, in korean)."
         )
 
     def _extract_kubectl_command(self, raw: str) -> str:
@@ -77,6 +77,8 @@ class ComplexCommandProcessor:
                 input=user_input,
                 instructions=instructions,
                 text_format=KubectlStructuredOutput,
+                reasoning={ "effort": "low" },
+                text={ "verbosity": "low" },
             )
 
             return response.output_parsed
