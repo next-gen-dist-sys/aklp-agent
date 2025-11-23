@@ -76,15 +76,14 @@ class ComplexCommandProcessor:
                     {
                         "type": "text",
                         "text": (
-                            "다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n"
-                            f"요청: {command}"
+                            f"다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n요청: {command}"
                         ),
                     }
                 ],
             },
         ]
 
-    def _call_responses(self, command: str) -> KubectlStructuredOutput | None | str:
+    def _call_responses(self, command: str) -> KubectlStructuredOutput | None | str | BaseModel:
         """Responses API 호출을 수행하고 BaseModel로 파싱."""
         messages = self._build_input_messages(command)
 
