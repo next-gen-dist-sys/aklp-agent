@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -21,7 +21,9 @@ class AgentRequestLog(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     raw_command: Mapped[str] = mapped_column(String(512), nullable=False)
     is_success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    requested_at: Mapped[datetime] = mapped_column(nullable=False, default=func.now())
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now()
+    )
     executed_command: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     session_id: Mapped[UUID | None] = mapped_column(nullable=True, default=None)
