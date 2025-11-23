@@ -96,11 +96,11 @@ class ComplexCommandProcessor:
                 timeout=self.timeout,
                 response_format=KubectlStructuredOutput,
             )
-            outputs = getattr(parsed, "output_parsed", None) or []
-            if outputs:
-                first = outputs[0]
-            else:
-                first = getattr(parsed.output[0], "parsed", None)
+            first = None
+            if parsed.output_parsed:
+                first = parsed.output_parsed[0]
+            elif parsed.output and parsed.output[0].parsed:
+                first = parsed.output[0].parsed
         except TypeError:
             # SDK가 BaseModel response_format을 지원하지 않는 경우 json_schema로 재시도
             fallback_schema = {
@@ -118,7 +118,7 @@ class ComplexCommandProcessor:
                 timeout=self.timeout,
                 response_format=fallback_schema,
             )
-            first = getattr(parsed.output[0], "parsed", None)
+            first = parsed.output[0].parsed if parsed.output else None
         except Exception as e:
             return f"kubectl # LLM_CALL_FAILED: {e}"
 
