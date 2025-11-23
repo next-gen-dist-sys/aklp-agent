@@ -7,6 +7,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.services.agent_service import ExecutorService
+from app.services.command_router import CommandRouter
+from app.services.complex_command_processor import ComplexCommandProcessor
+from app.services.executor import CommandExecutor
+from app.services.pattern_matching_system import PatternMatchingSystem
 
 # Database engine
 engine = create_async_engine(
@@ -36,3 +41,19 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 # Type alias for database dependency
 DBSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_executor_service(
+    db: DBSession,
+) -> ExecutorService:
+    router = CommandRouter()
+    complex_processor = ComplexCommandProcessor()
+    pattern_system = PatternMatchingSystem(complex_processor)
+    executor = CommandExecutor()
+
+    return ExecutorService(
+        db=db,
+        executor=executor,
+        router=router,
+        pattern_system=pattern_system,
+    )

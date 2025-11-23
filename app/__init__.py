@@ -1,3 +1,3 @@
-"""AKLP Service Template."""
+"""AKLP AI Agent."""
 
 __version__ = "0.1.0"

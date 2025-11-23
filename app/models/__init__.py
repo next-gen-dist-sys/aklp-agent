@@ -1,9 +1,9 @@
 """Database models package."""
 
-from sqlalchemy.orm import DeclarativeBase
+from app.models.agent import AgentRequestLog
+from app.models.base import Base
 
-
-class Base(DeclarativeBase):
-    """Base class for all database models."""
-
-    pass
+__all__ = [
+    "Base",
+    "AgentRequestLog",
+]
