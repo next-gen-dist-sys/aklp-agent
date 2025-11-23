@@ -88,9 +88,9 @@ class ComplexCommandProcessor:
         messages = self._build_input_messages(command)
 
         try:
-            parsed = self.client.responses.parse(
+            parsed = self.client.responses.parse(  # type: ignore[call-arg]
                 model=self.model,
-                input=messages,
+                input=messages,  # type: ignore[arg-type]
                 max_output_tokens=128,
                 timeout=self.timeout,
                 response_format=KubectlStructuredOutput,
@@ -98,8 +98,8 @@ class ComplexCommandProcessor:
             first = None
             if parsed.output_parsed:
                 first = parsed.output_parsed[0]
-            elif parsed.output and parsed.output[0].parsed:
-                first = parsed.output[0].parsed
+            elif parsed.output and parsed.output[0].parsed:  # type: ignore[union-attr]
+                first = parsed.output[0].parsed  # type: ignore[union-attr]
         except TypeError:
             # SDK가 BaseModel response_format을 지원하지 않는 경우 json_schema로 재시도
             fallback_schema = {
@@ -110,7 +110,7 @@ class ComplexCommandProcessor:
                     "strict": True,
                 },
             }
-            parsed = self.client.responses.create(
+            parsed = self.client.responses.create(  # type: ignore[call-overload]
                 model=self.model,
                 input=messages,
                 max_output_tokens=128,
