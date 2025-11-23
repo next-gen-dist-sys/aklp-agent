@@ -10,6 +10,7 @@ from app.models.agent import AgentRequestLog
 from app.services.command_router import CommandRouter
 from app.services.executor import CommandExecutionResult, CommandExecutor
 from app.services.pattern_matching_system import PatternMatchingSystem
+from app.services.types import GeneratedCommand
 
 
 class ExecutorService:
@@ -113,28 +114,13 @@ class ExecutorService:
         *,
         raw_command: str,
         session_id: UUID | None,
-    ) -> str:
-        """자연어 명령을 받아 kubectl 명령어를 생성하고, 요청 로그를 남긴 뒤 명령어 문자열을 반환.
-
-        Args:
-            raw_command: 사용자의 자연어 명령어
-            session_id: 세션 ID (선택)
-
-        Returns:
-            str: 생성된 kubectl 명령어 문자열
-
-        Raises:
-            AppException: 패턴 매칭에 실패하거나 복잡 명령으로 분류된 경우
-        """
-        # 1) 정규화
+    ) -> GeneratedCommand:
+        """자연어 명령을 받아 kubectl 명령어를 생성하고, 요청 로그를 남긴 뒤 결과 객체를 반환."""
         normalized = self.router.normalize_command(raw_command)
 
-        # 2) 패턴 매칭 → kubectl 명령어 or complex 처리 결과(문자열)
         generated = self.pattern_system.process_command(normalized)
 
-        # 3) 어떤 결과인지 판별
-        if not generated.startswith("kubectl "):
-            # 복잡 명령: 아직은 실제 kubectl이 아니라 LLM/추가 로직으로 가야 할 상황
+        if isinstance(generated, str):
             await self._log_request(
                 raw_command=raw_command,
                 session_id=session_id,
@@ -142,14 +128,22 @@ class ExecutorService:
                 is_success=False,
                 error_message=generated,
             )
-            # 도메인 예외 던져서 API에서 success=False로 응답
             raise AppException(message=generated)
 
-        # 4) 단순 명령: 성공으로 기록
+        if not generated.command.startswith("kubectl "):
+            await self._log_request(
+                raw_command=raw_command,
+                session_id=session_id,
+                generated_command=None,
+                is_success=False,
+                error_message="kubectl # UNABLE_TO_GENERATE",
+            )
+            raise AppException(message="kubectl # UNABLE_TO_GENERATE")
+
         await self._log_request(
             raw_command=raw_command,
             session_id=session_id,
-            generated_command=generated,
+            generated_command=generated.command,
             is_success=True,
             error_message=None,
         )

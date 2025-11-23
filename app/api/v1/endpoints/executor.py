@@ -31,7 +31,9 @@ async def execute_command(
         return CommandResponse(
             session_id=command_request.session_id,
             success=True,
-            command=generated_command,
+            command=generated_command.command,
+            reason=generated_command.reason,
+            title=generated_command.title,
             error_message=None,
         )
 
@@ -41,6 +43,8 @@ async def execute_command(
             session_id=command_request.session_id,
             success=False,
             command=None,
+            reason=None,
+            title=None,
             error_message=e.message,
         )
 

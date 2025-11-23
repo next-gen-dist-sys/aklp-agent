@@ -2,6 +2,7 @@ import re
 from typing import TypedDict  # TypedDict와 List를 추가로 임포트했습니다.
 
 from app.services.complex_command_processor import ComplexCommandProcessor
+from app.services.types import GeneratedCommand
 
 
 # 1. 딕셔너리 구조를 명확히 정의하는 TypedDict를 생성합니다.
@@ -134,7 +135,7 @@ class PatternMatchingSystem:
         intent_key: str,
         resource: str | None,
         filters: dict[str, str],
-    ) -> str:
+    ) -> GeneratedCommand:
         """
         intent_key 와 필터 정보를 바탕으로 최종 kubectl 명령어 생성
         """
@@ -145,7 +146,11 @@ class PatternMatchingSystem:
         )
         if definition is None:
             # 정의 안 된 인텐트면 그냥 fallback
-            return f"kubectl {intent_key}"
+            return GeneratedCommand(
+                command=f"kubectl {intent_key}",
+                reason="정의되지 않은 인텐트 fallback",
+                title="kubectl fallback",
+            )
 
         # label 값 정규화 (서비스 / 파드 이름 등)
         raw_label = filters.get("label")
@@ -156,25 +161,37 @@ class PatternMatchingSystem:
             # 파드 목록
             if label_value:
                 base_cmd = f"kubectl get pods -l app={label_value}"
+                reason = f"레이블 app={label_value} 파드 목록 조회"
+                title = f"Pods for {label_value}"
             else:
                 base_cmd = "kubectl get pods"
+                reason = "파드 목록 기본 조회"
+                title = "List pods"
 
         elif intent_key == "service_status":
             # 서비스 목록 / 상태
             if label_value:
                 # 특정 서비스만 보고 싶다면: kubectl get services <name>
                 base_cmd = f"kubectl get services {label_value}"
+                reason = f"{label_value} 서비스 상태 조회"
+                title = f"Service {label_value}"
             else:
                 base_cmd = "kubectl get services"
+                reason = "서비스 목록 조회"
+                title = "List services"
 
         elif intent_key == "pod_logs":
             # 로그는 target 필수 (사전 체크 있음)
             base_cmd = f"kubectl logs -f --tail=10 {label_value}"
+            reason = f"{label_value} 파드 로그 tail"
+            title = f"Logs for {label_value}"
         else:
             # 혹시 모를 확장용 fallback (템플릿 그대로 사용)
             # TypedDict 덕분에 mypy는 definition["kubectl_template"]이 str임을 압니다.
             kubectl_template: str = definition["kubectl_template"]
             base_cmd = kubectl_template.format(target=label_value or "")
+            reason = f"{intent_key} 기본 템플릿 실행"
+            title = intent_key
 
         parts: list[str] = [base_cmd]
 
@@ -190,12 +207,13 @@ class PatternMatchingSystem:
         if container:
             parts.append(f"-c {container}")
 
-        return " ".join(parts)
+        command_str = " ".join(parts)
+        return GeneratedCommand(command=command_str, reason=reason, title=title)
 
     def process_command(
         self,
         normalized_command: str,
-    ) -> str:
+    ) -> GeneratedCommand | str:
         """
         정규화된 명령어를 분석하여 kubectl 명령어를 반환
         """

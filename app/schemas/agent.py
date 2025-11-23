@@ -22,11 +22,19 @@ class CommandResponse(BaseModel):
 
     session_id: UUID | None = Field(None, description="세션 ID (선택 사항)")
     success: bool = Field(..., description="kubectl 명령어 생성 여부")
-    command: str | None = Field(None, description="명령어 실행 결과 데이터")
+    command: str | None = Field(None, description="kubectl 명령어")
+    reason: str | None = Field(None, description="명령어 선택 이유")
+    title: str | None = Field(None, description="간단한 요약/제목")
     error_message: str | None = Field(None, description="오류 발생 시 오류 메시지")
 
     model_config = {
         "json_schema_extra": {
-            "example": {"success": True, "command": "kubectl get pods -A", "error_message": None}
+            "example": {
+                "success": True,
+                "command": "kubectl get pods -A",
+                "reason": "모든 네임스페이스 파드 목록 조회",
+                "title": "List all pods",
+                "error_message": None,
+            }
         }
     }
