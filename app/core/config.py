@@ -1,6 +1,36 @@
 """Application configuration."""
 
+import os
+import tomllib
+from pathlib import Path
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def get_openai_api_key() -> str:
+    """Get OpenAI API key from ~/.aklp/config.toml or environment variable.
+
+    Priority:
+    1. ~/.aklp/config.toml (shared config file)
+    2. OPENAI_API_KEY environment variable (fallback)
+
+    Returns:
+        str: API key if found, empty string otherwise.
+    """
+    # Try config file first
+    config_file = Path.home() / ".aklp" / "config.toml"
+    if config_file.exists():
+        try:
+            config = tomllib.loads(config_file.read_text())
+            key = config.get("openai", {}).get("api_key")
+            if key:
+                return key
+        except Exception:
+            pass  # Fall through to environment variable
+
+    # Fallback to environment variable
+    return os.environ.get("OPENAI_API_KEY", "")
 
 
 class Settings(BaseSettings):
@@ -25,7 +55,7 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"  # json or text
 
     # OpenAI
-    OPENAI_API_KEY: str
+    OPENAI_API_KEY: str = Field(default_factory=get_openai_api_key)
     OPENAI_MODEL: str = "gpt-5"
     OPENAI_TIMEOUT: int = 20
 
