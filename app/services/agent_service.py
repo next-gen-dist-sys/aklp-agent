@@ -5,12 +5,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppException
 from app.models.agent import AgentRequestLog
+from app.models.usage import APIUsageLog
 from app.services.command_router import CommandRouter
 from app.services.executor import CommandExecutionResult, CommandExecutor
 from app.services.pattern_matching_system import PatternMatchingSystem
-from app.services.types import GeneratedCommand
+from app.services.types import GeneratedCommand, UsageInfo
 
 
 class ExecutorService:
@@ -74,8 +76,12 @@ class ExecutorService:
         generated_command: str | None,
         is_success: bool,
         error_message: str | None,
-    ) -> None:
-        """자연어 → kubectl 변환 결과를 요청 로그 테이블에 기록."""
+    ) -> UUID:
+        """자연어 → kubectl 변환 결과를 요청 로그 테이블에 기록.
+
+        Returns:
+            UUID: Created log record ID for correlation with usage log
+        """
         log = AgentRequestLog(
             raw_command=raw_command,
             is_success=is_success,
@@ -84,6 +90,26 @@ class ExecutorService:
             session_id=session_id,
         )
         self.db.add(log)
+        await self.db.commit()
+        await self.db.refresh(log)
+        return log.id
+
+    async def _log_usage(
+        self,
+        usage: UsageInfo,
+        session_id: UUID | None = None,
+        request_log_id: UUID | None = None,
+    ) -> None:
+        """OpenAI API 사용량을 DB에 기록."""
+        usage_log = APIUsageLog(
+            model=settings.OPENAI_MODEL,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_tokens=usage.cached_tokens,
+            session_id=session_id,
+            request_log_id=request_log_id,
+        )
+        self.db.add(usage_log)
         await self.db.commit()
 
     async def _log_execution(
@@ -140,12 +166,20 @@ class ExecutorService:
             )
             raise AppException(message="kubectl # UNABLE_TO_GENERATE")
 
-        await self._log_request(
+        request_log_id = await self._log_request(
             raw_command=raw_command,
             session_id=session_id,
             generated_command=generated.command,
             is_success=True,
             error_message=None,
         )
+
+        # Log API usage if available (only when LLM was called)
+        if generated.usage is not None:
+            await self._log_usage(
+                usage=generated.usage,
+                session_id=session_id,
+                request_log_id=request_log_id,
+            )
 
         return generated
