@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -15,6 +13,7 @@ class KubectlStructuredOutput(BaseModel):
     command: str
     reason: str
     title: str
+    model_config = {"extra": "forbid"}
 
 
 class ComplexCommandProcessor:
@@ -25,6 +24,7 @@ class ComplexCommandProcessor:
         self.client = client or OpenAI(api_key=api_key)
         self.model = settings.OPENAI_MODEL
         self.timeout = settings.OPENAI_TIMEOUT
+        self.max_output_tokens = 512
 
     def _build_system_prompt(self) -> str:
         """system 프롬프트 정의"""
@@ -64,97 +64,81 @@ class ComplexCommandProcessor:
 
         return text
 
-    def _build_input_messages(self, command: str) -> list[dict[str, str]]:
-        """Responses API input 메시지 생성."""
-        return [
-            {
-                "role": "developer",
-                "content": self._build_system_prompt(),
-            },
-            {
-                "role": "user",
-                "content": f"다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n요청: {command}",
-            },
-        ]
+    def _build_user_input(self, command: str) -> str:
+        """사용자 입력 콘텐츠 생성."""
+        return f"다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n요청: {command}"
+
+    def _extract_structured_payload(self, response: object) -> tuple[KubectlStructuredOutput | str | None, bool]:
+        """
+        Responses API 결과에서 Structured Output을 추출.
+
+        반환:
+            payload: KubectlStructuredOutput | str | None - 파싱된 모델 또는 거절 메시지
+            refused: bool - 거절 여부
+        """
+        parsed = getattr(response, "output_parsed", None)
+        if parsed:
+            return parsed, False
+
+        output_items = getattr(response, "output", None) or []
+        for item in output_items:
+            contents = getattr(item, "content", None) or []
+            for content in contents:
+                if getattr(content, "type", None) == "refusal":
+                    return f"kubectl # REFUSED: {getattr(content, 'refusal', 'Unknown reason')}", True
+
+        return None, False
 
     def _call_responses(self, command: str) -> tuple[KubectlStructuredOutput | None | str, UsageInfo | None]:
         """Responses API 호출을 수행하고 BaseModel로 파싱."""
-        messages = self._build_input_messages(command)
         usage_info: UsageInfo | None = None
 
-        # JSON Schema for structured output
-        json_schema = {
-            "type": "json_schema",
-            "name": "kubectl_command",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The kubectl command line"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Brief reasoning for the command"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Concise summary title"
-                    }
-                },
-                "required": ["command", "reason", "title"],
-                "additionalProperties": False
-            },
-            "strict": True
-        }
-
-        try:
-            response = self.client.responses.create(
+        def _invoke(max_tokens: int):
+            resp = self.client.responses.parse(
                 model=self.model,
-                input=messages,
-                max_output_tokens=256,
+                instructions=self._build_system_prompt(),
+                input=self._build_user_input(command),
+                max_output_tokens=max_tokens,
                 timeout=self.timeout,
-                text={"format": json_schema},
+                text_format=KubectlStructuredOutput,
             )
-
-            # Extract usage information
-            if hasattr(response, 'usage') and response.usage:
-                usage = response.usage
+            usage: UsageInfo | None = None
+            if hasattr(resp, "usage") and resp.usage:
+                u = resp.usage
                 cached_tokens = 0
-                if hasattr(usage, 'input_tokens_details') and usage.input_tokens_details:
-                    cached_tokens = getattr(usage.input_tokens_details, 'cached_tokens', 0) or 0
-                usage_info = UsageInfo(
-                    input_tokens=getattr(usage, 'input_tokens', 0) or 0,
-                    output_tokens=getattr(usage, 'output_tokens', 0) or 0,
+                if hasattr(u, "input_tokens_details") and u.input_tokens_details:
+                    cached_tokens = getattr(u.input_tokens_details, "cached_tokens", 0) or 0
+                usage = UsageInfo(
+                    input_tokens=getattr(u, "input_tokens", 0) or 0,
+                    output_tokens=getattr(u, "output_tokens", 0) or 0,
                     cached_tokens=cached_tokens,
                 )
+            return resp, usage
 
-            # Check for refusal
-            if response.output and len(response.output) > 0:
-                first_output = response.output[0]
-                if hasattr(first_output, 'content') and first_output.content:
-                    content = first_output.content[0]
-                    if hasattr(content, 'type') and content.type == "refusal":
-                        return f"kubectl # REFUSED: {getattr(content, 'refusal', 'Unknown reason')}", usage_info
+        try:
+            response, usage_info = _invoke(self.max_output_tokens)
 
-            # Get output text and parse JSON
-            output_text = getattr(response, 'output_text', None)
-            if not output_text and response.output:
-                # Fallback: try to get text from output structure
-                first_output = response.output[0]
-                if hasattr(first_output, 'content') and first_output.content:
-                    content = first_output.content[0]
-                    if hasattr(content, 'text'):
-                        output_text = content.text
+            if getattr(response, "status", None) == "incomplete":
+                details = getattr(response, "incomplete_details", None)
+                reason = getattr(details, "reason", "unknown")
+                if reason == "max_output_tokens":
+                    response, usage_info = _invoke(self.max_output_tokens * 2)
+                else:
+                    return f"kubectl # INCOMPLETE: {reason}", usage_info
 
-            if output_text:
-                try:
-                    data = json.loads(output_text)
-                    return KubectlStructuredOutput(**data), usage_info
-                except (json.JSONDecodeError, TypeError) as e:
-                    return f"kubectl # JSON_PARSE_FAILED: {e}", usage_info
+            if getattr(response, "status", None) == "incomplete":
+                details = getattr(response, "incomplete_details", None)
+                reason = getattr(details, "reason", "unknown")
+                return f"kubectl # INCOMPLETE: {reason}", usage_info
 
-            return None, usage_info
+            payload, refused = self._extract_structured_payload(response)
+            if refused:
+                return payload or "kubectl # REFUSED", usage_info
+
+            if isinstance(payload, KubectlStructuredOutput):
+                return payload, usage_info
+
+            return "kubectl # UNABLE_TO_GENERATE: empty response", usage_info
 
         except Exception as e:
             return f"kubectl # LLM_CALL_FAILED: {e}", usage_info

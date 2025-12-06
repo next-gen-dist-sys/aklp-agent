@@ -56,8 +56,8 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = Field(default_factory=get_openai_api_key)
-    OPENAI_MODEL: str = "gpt-5"
-    OPENAI_TIMEOUT: int = 20
+    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_TIMEOUT: int = 60
 
 
 settings = Settings()
