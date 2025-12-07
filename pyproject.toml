@@ -1,7 +1,7 @@
 [project]
-name = "service-template"
+name = "aklp-agent"
 version = "0.1.0"
-description = "FastAPI service template for AKLP"
+description = "AKLP Agent - AI-powered Kubernetes learning assistant"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
