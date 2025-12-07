@@ -26,7 +26,9 @@ def upgrade() -> None:
         sa.Column("input_tokens", sa.Integer(), nullable=False),
         sa.Column("output_tokens", sa.Integer(), nullable=False),
         sa.Column("cached_tokens", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("session_id", sa.Uuid(), nullable=True),
         sa.Column("request_log_id", sa.Uuid(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
