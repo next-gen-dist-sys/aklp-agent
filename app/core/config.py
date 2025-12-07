@@ -24,7 +24,7 @@ def get_openai_api_key() -> str:
         try:
             config = tomllib.loads(config_file.read_text())
             key = config.get("openai", {}).get("api_key")
-            if key:
+            if isinstance(key, str) and key:
                 return key
         except Exception:
             pass  # Fall through to environment variable

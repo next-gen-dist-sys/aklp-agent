@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Query, status
 
 from app.core.deps import DBSession
 from app.schemas.usage import UsageResponse, UsageStatsData

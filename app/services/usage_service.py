@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -127,7 +127,7 @@ class UsageService:
         Returns:
             UsageStats with aggregated data
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         period_start: datetime | None = None
         period_end: datetime | None = now
 

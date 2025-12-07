@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from openai import OpenAI
+from openai.types.responses import ParsedResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -68,7 +69,9 @@ class ComplexCommandProcessor:
         """사용자 입력 콘텐츠 생성."""
         return f"다음 요청을 하나의 kubectl 명령어로 변환해 주세요.\n요청: {command}"
 
-    def _extract_structured_payload(self, response: object) -> tuple[KubectlStructuredOutput | str | None, bool]:
+    def _extract_structured_payload(
+        self, response: object
+    ) -> tuple[KubectlStructuredOutput | str | None, bool]:
         """
         Responses API 결과에서 Structured Output을 추출.
 
@@ -85,15 +88,22 @@ class ComplexCommandProcessor:
             contents = getattr(item, "content", None) or []
             for content in contents:
                 if getattr(content, "type", None) == "refusal":
-                    return f"kubectl # REFUSED: {getattr(content, 'refusal', 'Unknown reason')}", True
+                    return (
+                        f"kubectl # REFUSED: {getattr(content, 'refusal', 'Unknown reason')}",
+                        True,
+                    )
 
         return None, False
 
-    def _call_responses(self, command: str) -> tuple[KubectlStructuredOutput | None | str, UsageInfo | None]:
+    def _call_responses(
+        self, command: str
+    ) -> tuple[KubectlStructuredOutput | None | str, UsageInfo | None]:
         """Responses API 호출을 수행하고 BaseModel로 파싱."""
         usage_info: UsageInfo | None = None
 
-        def _invoke(max_tokens: int):
+        def _invoke(
+            max_tokens: int,
+        ) -> tuple[ParsedResponse[KubectlStructuredOutput], UsageInfo | None]:
             resp = self.client.responses.parse(
                 model=self.model,
                 instructions=self._build_system_prompt(),
