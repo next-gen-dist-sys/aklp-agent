@@ -25,7 +25,7 @@ class ComplexCommandProcessor:
         self.client = client or OpenAI(api_key=api_key)
         self.model = settings.OPENAI_MODEL
         self.timeout = settings.OPENAI_TIMEOUT
-        self.max_output_tokens = 512
+        self.max_output_tokens = 1024
 
     def _build_system_prompt(self) -> str:
         """system 프롬프트 정의"""
